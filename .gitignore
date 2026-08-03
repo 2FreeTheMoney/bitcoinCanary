@@ -12,3 +12,6 @@ state.json
 secring*
 .omc/
 docs/PRIVATE-NOTES.md
+# build/transfer artifacts — never belong in the repo
+*.tar.gz
+*.tgz
