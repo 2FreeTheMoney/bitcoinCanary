@@ -1,0 +1,31 @@
+# canaryEW status surface: a separate, keyless process.
+#
+# It reads the redacted snapshot file and nothing else -- no passphrase, no
+# control socket, no RPC credentials. Runs as its own user so that even this
+# process's compromise cannot reach the monitor's state directory beyond the
+# world-readable-by-group snapshot.
+
+[Unit]
+Description=canaryEW status web surface (keyless)
+After=network-online.target canaryew.service
+
+[Service]
+Type=simple
+User=canaryew-web
+Group=canaryew
+EnvironmentFile=/etc/canaryew/canaryew.env
+ExecStart=/opt/canaryew/.venv/bin/uvicorn --factory canaryew.web.app:create_app \
+    --host 127.0.0.1 --port 8791
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

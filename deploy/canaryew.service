@@ -1,0 +1,40 @@
+# canaryEW monitor unit.
+#
+# Starts LOCKED after every boot (passphrase-on-start, DESIGN S6): it will
+# announce itself over the webhook channel and wait for `canaryew unlock`.
+# Restart=always is safe *because* of that design -- a crash loop cannot leak
+# anything, and the boot notices it generates are themselves the signal that
+# something is wrong.
+
+[Unit]
+Description=canaryEW early-warning spend monitor
+Documentation=file:///opt/canaryew/docs/RUNBOOK.md
+After=network-online.target bitcoind.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=canaryew
+Group=canaryew
+EnvironmentFile=/etc/canaryew/canaryew.env
+ExecStart=/opt/canaryew/.venv/bin/canaryew run
+Restart=always
+RestartSec=10
+
+# Hardening. The service needs: its state dir, the control socket dir, and
+# read access to bitcoind's RPC cookie (grant via the bitcoin group).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/canaryew
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# Argon2id at unlock needs ~256 MiB; leave headroom.
+MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target
