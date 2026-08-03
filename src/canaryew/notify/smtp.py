@@ -27,7 +27,7 @@ import smtplib
 import ssl
 from datetime import datetime, timezone
 from email.message import EmailMessage
-from email.utils import formatdate
+from email.utils import format_datetime, make_msgid, parseaddr
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -119,13 +119,38 @@ class SmtpChannel:
                 "Subject contains CR/LF; refusing to send.", permanent=True
             )
 
+        sender = self._settings.from_addr or "canaryew@localhost"
         message = EmailMessage()
-        message["From"] = self._settings.from_addr or "canaryew@localhost"
+        message["From"] = sender
         message["To"] = ", ".join(self._settings.to_addrs) or "operator@localhost"
         message["Subject"] = subject
-        message["Date"] = formatdate(localtime=False)
+        # UTC with a real "+0000" offset. formatdate(localtime=False) emits
+        # "-0000" ("zone unknown"), which some filters score as suspicious.
+        message["Date"] = format_datetime(datetime.now(timezone.utc))
+        # A missing Message-ID is a well-known spam signal (SpamAssassin
+        # MISSING_MID); smtplib never adds one and Postfix only backfills it
+        # with always_add_missing_headers. The domain is taken from the
+        # sender rather than left to make_msgid's default, which would call
+        # socket.getfqdn() and leak the node's internal hostname.
+        message["Message-ID"] = make_msgid(domain=self._helo_name())
         message.set_content(body)
         return message
+
+    def _helo_name(self) -> str:
+        """Hostname to announce, and the Message-ID domain.
+
+        Defaults to the sender's domain because smtplib would otherwise use
+        ``socket.getfqdn()``, which on Debian resolves through the
+        ``127.0.1.1`` line in /etc/hosts and announces ``EHLO [127.0.1.1]``
+        -- a loopback literal that scores as HELO_LOCALHOST and reads as
+        forged. Override with CANARYEW_SMTP_HELO when the node has a proper
+        FQDN with matching forward/reverse DNS.
+        """
+        if self._settings.helo_name:
+            return self._settings.helo_name
+        _, address = parseaddr(self._settings.from_addr)
+        domain = address.rpartition("@")[2]
+        return domain or "localhost"
 
     # -------------------------------------------------------------- delivery --
 
@@ -160,15 +185,20 @@ class SmtpChannel:
     def _connect(self) -> smtplib.SMTP:
         """Open and secure a session. TLS is not optional in smtp mode."""
         context = ssl.create_default_context()
+        helo = self._helo_name()
         if self._settings.port == 465:
             return smtplib.SMTP_SSL(
                 self._settings.host,
                 self._settings.port,
+                local_hostname=helo,
                 timeout=self._settings.timeout,
                 context=context,
             )
         client = smtplib.SMTP(
-            self._settings.host, self._settings.port, timeout=self._settings.timeout
+            self._settings.host,
+            self._settings.port,
+            local_hostname=helo,
+            timeout=self._settings.timeout,
         )
         if self._settings.starttls:
             client.starttls(context=context)

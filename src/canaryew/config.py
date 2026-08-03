@@ -116,6 +116,10 @@ class SmtpSettings:
     timeout: float = 30.0
     file_path: str = ""
     """Where the ``file`` transport appends rendered messages."""
+    helo_name: str = ""
+    """Hostname announced in EHLO, and the Message-ID domain. Empty means
+    derive it from the sender's domain -- see SmtpChannel._helo_name for why
+    the library default is unusable on a typical Debian host."""
 
 
 @dataclass(frozen=True)
@@ -215,6 +219,7 @@ def _build_config() -> Config:
         starttls=_env_bool("CANARYEW_SMTP_STARTTLS", True),
         timeout=float(_env_int("CANARYEW_SMTP_TIMEOUT_SECONDS", 30)),
         file_path=_env("CANARYEW_SMTP_FILE_PATH", str(home / "outbox.log")),
+        helo_name=_env("CANARYEW_SMTP_HELO"),
     )
 
     redaction = _env("CANARYEW_REDACTION", "minimal").lower()

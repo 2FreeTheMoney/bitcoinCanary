@@ -77,6 +77,48 @@ def test_file_transport_renders_full_message(tmp_path: Path) -> None:
     assert channel.healthy()
 
 
+def test_message_carries_deliverability_headers(tmp_path: Path) -> None:
+    """Missing Message-ID and a '-0000' date are classic spam signals."""
+    outbox = tmp_path / "outbox.log"
+    channel = SmtpChannel(
+        SmtpSettings(mode="file", file_path=str(outbox),
+                     from_addr="canary@example.org", to_addrs=("op@example.org",))
+    )
+    channel.send(notification())
+    text = outbox.read_text()
+
+    assert "Message-ID: <" in text
+    assert "@example.org>" in text      # sender's domain, not the node's fqdn
+    assert "+0000" in text and "-0000" not in text
+
+
+def test_helo_name_defaults_to_sender_domain_not_local_fqdn() -> None:
+    """smtplib would announce EHLO [127.0.1.1] on a typical Debian host."""
+    channel = SmtpChannel(smtp_settings(from_addr="canary@example.org"), "pw")
+    assert channel._helo_name() == "example.org"
+
+    override = SmtpChannel(
+        smtp_settings(from_addr="canary@example.org", helo_name="node.example.org"), "pw"
+    )
+    assert override._helo_name() == "node.example.org"
+
+
+def test_helo_name_is_used_for_the_connection(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_smtp(host, port, local_hostname=None, timeout=None):
+        captured["local_hostname"] = local_hostname
+        return _FakeSmtpClient(None)
+
+    channel = SmtpChannel(smtp_settings(from_addr="canary@example.org"), "pw")
+    monkeypatch.setattr(smtplib, "SMTP", fake_smtp)
+    monkeypatch.setattr(
+        channel, "_connect", lambda: fake_smtp("h", 587, channel._helo_name(), 30)
+    )
+    channel.send(notification())
+    assert captured["local_hostname"] == "example.org"
+
+
 def test_console_transport(capsys) -> None:
     channel = SmtpChannel(SmtpSettings(mode="console"))
     channel.send(notification())
