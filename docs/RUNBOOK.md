@@ -257,6 +257,24 @@ critical severity. Verify all of:
 You have now seen a real alert once, before it matters. If the push did not
 break through, fix Critical Alerts permission on the phone and re-test.
 
+**The email must land in the inbox, not Junk.** A spam-filed alert is a
+suppressed alert — indistinguishable, to you, from one that was never sent.
+PGP mail is unusually spam-prone: the body is high-entropy ciphertext with no
+readable words. canaryEW does its part (proper `Message-ID`, `+0000` date,
+and an `EHLO` of your sender's domain rather than the library default, which
+on Debian announces the useless `[127.0.1.1]`). If alerts still land in Junk:
+
+- Read the `Received:` and `X-Spam-Status:` headers of a junked message.
+  `from [127.0.1.1]` or `unknown [<ip>]` means HELO/rDNS scoring — set
+  `CANARYEW_SMTP_HELO` to a name with matching forward/reverse DNS, or add a
+  PTR record for the node's address.
+- No `X-Spam-*` headers at all means your *client* filed it, not the server;
+  mark a few messages "not junk" so it relearns.
+- Once a few alerts have been junked, Bayesian filters keep junking them.
+  Retrain (`sa-learn --ham`) rather than waiting it out.
+- Whitelisting the authenticated sender is legitimate here — it is your own
+  account: `whitelist_auth canary@example.org` in SpamAssassin's `local.cf`.
+
 ## 9. Reboot drill — also do not skip
 
 ```bash
