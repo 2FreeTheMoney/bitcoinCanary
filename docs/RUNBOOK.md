@@ -354,7 +354,31 @@ Sparrow, re-enroll, re-import — your new outputs are not watched until you do.
 A spend alert never clears itself. Silence after an alert means the alert
 still stands.
 
-## 12. Maintenance
+## 12. Planned node maintenance
+
+canaryEW cannot tell your maintenance from an attack, and by design it errs
+loud. Expect this during planned work:
+
+- **bitcoind down past the 30-minute grace** → a `degraded` alert
+  (time-sensitive). Shorter restarts pass silently; the grace exists for
+  exactly this.
+- **Node reboot** → a `LOCKED` notice, then no heartbeats until you run
+  `canaryew unlock`. Monitoring is suspended for that whole interval.
+
+To keep the drill clean, either accept the alerts as confirmation the system
+works, or stop the service first and restart it after:
+
+```bash
+sudo systemctl stop canaryew          # no degraded alert, no heartbeats
+# ... maintenance ...
+sudo systemctl start canaryew && canaryew unlock
+```
+
+Stopping is the honest option only because *you* know why the heartbeat
+stopped. Never leave it stopped: a silent canaryEW is indistinguishable from
+a suppressed one, which is the state this project exists to make impossible.
+
+## 13. Routine maintenance
 
 - **Rotate the brrr secret**: update `canaryew.env`, restart the service.
 - **Change SMTP password**: `canaryew set-smtp-password` (service stopped).

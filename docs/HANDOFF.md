@@ -1,6 +1,6 @@
 # canaryEW — Handoff
 
-Status as of 2026-08-02 (second session). Read this plus `docs/DESIGN.md`
+Status as of 2026-08-03 (deployed and running). Read this plus `docs/DESIGN.md`
 before continuing. Operator-facing setup lives in `docs/RUNBOOK.md`.
 
 ## What this is
@@ -37,7 +37,7 @@ Supporting rules and hard-won platform quirks are in `AGENTS.md`.
 | Co-resident apps | **Not integrated** at process/data layer | Patterns shared, runtime separate. |
 | HTTP | **stdlib only** for RPC and brrr | Small auditable dependency surface. |
 
-## Built and tested (107 tests passing)
+## Built and tested (153 tests passing)
 
 ```
 src/canaryew/
@@ -62,7 +62,8 @@ src/canaryew/
   web/app.py     FastAPI keyless status surface (health/status/heartbeat)
 deploy/          canaryew.service, canaryew-web.service, env example,
                  nginx subpath snippet, deploy.sh
-docs/RUNBOOK.md  Operator setup incl. Sparrow UTXO export expectations
+docs/RUNBOOK.md  Operator setup, enrollment expectations, drills,
+                 deliverability and planned-maintenance guidance
 ```
 
 Run tests: `./.venv/bin/python -m pytest tests/ -q`
@@ -83,7 +84,11 @@ First end-to-end deployment is done, and these are no longer theoretical:
   mode. The full payload (`thread_id`/`sound`/`volume`) is accepted in
   practice, not just the minimal corroborated core.
 - **Detection loop against live bitcoind**, cookie auth via a shared group,
-  heartbeat seq 1 emitted, snapshot and control socket working.
+  snapshot and control socket working.
+- **Scheduled heartbeats arriving on both channels** -- the dead-man switch
+  is armed, not just implemented.
+- **Inbox (not Junk) mail delivery**, after fixing HELO/Message-ID/Date; see
+  runbook section 8 for the deliverability checklist.
 
 Still unexercised in production: the reboot drill (runbook section 9 —
 LOCKED notice, then unlock), a real spend alert, and `ack` + re-enrollment.
