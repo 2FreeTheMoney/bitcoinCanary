@@ -51,8 +51,8 @@ class FakeUrlopen:
         return json.loads(self.requests[index].data.decode("utf-8"))
 
 
-def http_error(code: int) -> urllib.error.HTTPError:
-    return urllib.error.HTTPError("url", code, "msg", {}, io.BytesIO(b""))
+def http_error(code: int, body: bytes = b"") -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("url", code, "msg", {}, io.BytesIO(body))
 
 
 # ------------------------------------------------------- corroborated shape -- #
@@ -170,6 +170,39 @@ def test_transport_error_redacts_secret(monkeypatch) -> None:
         BrrrChannel(SECRET).send(note())
     assert SECRET not in str(excinfo.value)
     assert "unreachable" in str(excinfo.value)
+
+
+def test_error_surfaces_api_reason(monkeypatch) -> None:
+    """The API's own explanation is the whole point of a 4xx body."""
+    body = b'{"error":"critical alerts not enabled for this key"}'
+    fake = FakeUrlopen(errors=[http_error(403, body), http_error(403, body)])
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+
+    with pytest.raises(DeliveryError) as excinfo:
+        BrrrChannel(SECRET).send(note())
+    assert "critical alerts not enabled" in str(excinfo.value)
+
+
+def test_error_body_is_truncated_and_redacted(monkeypatch) -> None:
+    """A body echoing the request must not spill the secret, and is truncated
+    so an echoed alert cannot put the verification phrase into logs."""
+    body = (f"rejected token {SECRET} for request ".encode() + b"x" * 500)
+    fake = FakeUrlopen(errors=[http_error(403, body), http_error(403, body)])
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+
+    with pytest.raises(DeliveryError) as excinfo:
+        BrrrChannel(SECRET).send(note())
+    message = str(excinfo.value)
+    assert SECRET not in message
+    assert len(message) < 400
+
+
+def test_describe_is_safe_and_useful() -> None:
+    described = BrrrChannel(SECRET).describe()
+    assert SECRET not in described
+    assert f"len={len(SECRET)}" in described
+    assert "url-path" in described
+    assert "bearer" in BrrrChannel(SECRET, use_bearer=True).describe()
 
 
 # ------------------------------------------------------------------ hygiene -- #

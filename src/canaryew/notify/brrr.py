@@ -125,6 +125,32 @@ class BrrrChannel:
         """Errors and logs must never carry the secret (it rides in the URL)."""
         return text.replace(self._secret, redact_secret(self._secret))
 
+    def _error_detail(self, exc: urllib.error.HTTPError) -> str:
+        """Truncated, secret-redacted response body for diagnosis.
+
+        The body is where the API says *why* it refused, which is otherwise
+        invisible to the operator. Truncated hard because an API that echoes
+        the request back would otherwise put the verification phrase (which
+        lives near the end of an alert body) into logs.
+        """
+        try:
+            raw = exc.read().decode("utf-8", "replace").strip()
+        except Exception:
+            return ""
+        if not raw:
+            return ""
+        snippet = self._redact(raw[:200].replace("\n", " "))
+        return f": {snippet}"
+
+    def describe(self) -> str:
+        """Safe-to-print summary of what this channel will send, for setup
+        diagnosis: which endpoint form, and which secret value was loaded."""
+        form = "bearer /v1/send" if self._use_bearer else "url-path /v1/<secret>"
+        return (
+            f"brrr endpoint={form} secret={redact_secret(self._secret)} "
+            f"len={len(self._secret)}"
+        )
+
     def _post(self, payload: dict[str, object]) -> None:
         request = urllib.request.Request(
             self._endpoint(),
@@ -146,11 +172,14 @@ class BrrrChannel:
             # more than the metadata: fall back to the corroborated minimal
             # payload once before giving up.
             if not 400 <= exc.code < 500:
-                # Deliberately does not echo the response body: it may contain
-                # the secret or request echo, and this string reaches logs.
-                raise DeliveryError(f"brrr rejected the request: HTTP {exc.code}") from exc
+                raise DeliveryError(
+                    f"brrr rejected the request: HTTP {exc.code}"
+                    f"{self._error_detail(exc)}"
+                ) from exc
             logger.warning(
-                "brrr returned HTTP %d; retrying with minimal payload", exc.code
+                "brrr returned HTTP %d (%s); retrying with minimal payload",
+                exc.code,
+                self.describe(),
             )
         except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
             raise DeliveryError(f"brrr unreachable: {self._redact(str(exc))}") from exc
@@ -158,7 +187,10 @@ class BrrrChannel:
         try:
             self._post(self._payload(notification, minimal=True))
         except urllib.error.HTTPError as exc:
-            raise DeliveryError(f"brrr rejected the request: HTTP {exc.code}") from exc
+            raise DeliveryError(
+                f"brrr rejected the request: HTTP {exc.code}"
+                f"{self._error_detail(exc)} [{self.describe()}]"
+            ) from exc
         except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
             raise DeliveryError(f"brrr unreachable: {self._redact(str(exc))}") from exc
 

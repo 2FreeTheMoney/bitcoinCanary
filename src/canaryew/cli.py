@@ -304,7 +304,12 @@ def cmd_test_alert(config: Config, args: argparse.Namespace) -> int:
     elif config.smtp.mode != "disabled":
         print(f"SMTP channel disabled: {smtp.disabled_reason}")
     if config.brrr_secret:
-        channels.append(BrrrChannel(config.brrr_secret))
+        brrr = BrrrChannel(config.brrr_secret)
+        # Printed so a mismatch between the configured value and the one the
+        # operator tested by hand (wrong file, stray quote, inline comment,
+        # truncated paste) is visible rather than inferred from a bare 403.
+        print(f"  config: {brrr.describe()}")
+        channels.append(brrr)
     if not channels:
         raise CliError("No channels configured; nothing to test.")
 
