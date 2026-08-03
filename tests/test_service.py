@@ -6,6 +6,7 @@ import json
 import shutil
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -72,6 +73,107 @@ def test_startup_announces_locked_state(home: Path) -> None:
         assert status["boot_count"] == 1
         # A locked snapshot must not leak monitored-state details.
         assert "watches" not in status
+    finally:
+        service.shutdown()
+
+
+def test_boot_notice_retries_through_a_network_outage(home: Path, monkeypatch) -> None:
+    """At boot the network is often not usable yet; the LOCKED notice must
+    survive that rather than being lost for hours."""
+    import canaryew.service as service_mod
+    from canaryew.notify.base import DeliveryError
+
+    monkeypatch.setattr(service_mod, "BOOT_NOTICE_BACKOFF", (0.01, 0.01, 0.01))
+
+    class FlakyChannel:
+        name = "flaky"
+
+        def __init__(self) -> None:
+            self.attempts = 0
+
+        def send(self, notification) -> None:
+            self.attempts += 1
+            if self.attempts < 3:      # network down for the first two tries
+                raise DeliveryError("temporary failure in name resolution")
+
+        def healthy(self) -> bool:
+            return True
+
+    flaky = FlakyChannel()
+    config = load_config({"CANARYEW_HOME": str(home)})
+    StateStore(config.state_path).initialize(PASSPHRASE)
+    service = Service(config, rpc=FakeRpc())
+    monkeypatch.setattr(service, "_boot_channels", lambda: [flaky])
+    try:
+        service.startup()
+        deadline = time.monotonic() + 5
+        while flaky.attempts < 3 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert flaky.attempts == 3     # kept trying, then succeeded
+    finally:
+        service.shutdown()
+
+
+def test_control_socket_opens_before_the_boot_notice(home: Path, monkeypatch) -> None:
+    """Notifying must never delay the operator's ability to unlock."""
+    config = load_config({"CANARYEW_HOME": str(home)})
+    StateStore(config.state_path).initialize(PASSPHRASE)
+    service = Service(config, rpc=FakeRpc())
+
+    socket_ready_when_sending: list[bool] = []
+
+    class ObservingChannel:
+        name = "observer"
+
+        def send(self, notification) -> None:
+            socket_ready_when_sending.append(config.control_socket_path.exists())
+
+        def healthy(self) -> bool:
+            return True
+
+    monkeypatch.setattr(service, "_boot_channels", lambda: [ObservingChannel()])
+    try:
+        service.startup()
+        deadline = time.monotonic() + 5
+        while not socket_ready_when_sending and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert socket_ready_when_sending == [True]
+    finally:
+        service.shutdown()
+
+
+def test_boot_notice_stops_once_unlocked(home: Path, monkeypatch) -> None:
+    """A 'come unlock me' that lands after you already did is noise."""
+    import canaryew.service as service_mod
+    from canaryew.notify.base import DeliveryError
+
+    monkeypatch.setattr(service_mod, "BOOT_NOTICE_BACKOFF", (0.05,) * 20)
+
+    class AlwaysFailing:
+        name = "down"
+
+        def __init__(self) -> None:
+            self.attempts = 0
+
+        def send(self, notification) -> None:
+            self.attempts += 1
+            raise DeliveryError("still down")
+
+        def healthy(self) -> bool:
+            return True
+
+    channel = AlwaysFailing()
+    config = load_config({"CANARYEW_HOME": str(home)})
+    StateStore(config.state_path).initialize(PASSPHRASE)
+    service = Service(config, rpc=FakeRpc())
+    monkeypatch.setattr(service, "_boot_channels", lambda: [channel])
+    try:
+        service.startup()
+        time.sleep(0.15)
+        service.handle_command({"command": "unlock", "passphrase": PASSPHRASE})
+        settled = channel.attempts
+        time.sleep(0.3)
+        assert channel.attempts <= settled + 1   # stopped promptly after unlock
     finally:
         service.shutdown()
 

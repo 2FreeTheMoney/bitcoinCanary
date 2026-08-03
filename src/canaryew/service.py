@@ -56,6 +56,11 @@ logger = logging.getLogger("canaryew.service")
 
 DEGRADED_GRACE_SECONDS_DEFAULT = 1800.0
 
+BOOT_NOTICE_BACKOFF: Final[tuple[float, ...]] = (5.0, 10.0, 20.0, 30.0, 60.0, 60.0, 60.0)
+"""Waits between LOCKED-notice attempts (~4.5 minutes total). Deliberately
+patient: at boot the network is often unusable for the first minute, and a
+lost LOCKED notice is the failure this message exists to prevent."""
+
 
 class Service:
     """Owns the monitor loop and the control-socket command handlers."""
@@ -127,23 +132,67 @@ class Service:
     # ------------------------------------------------------------ lifecycle --
 
     def startup(self) -> None:
-        """Record the boot, announce LOCKED, open the control socket."""
+        """Record the boot, open the control socket, announce LOCKED.
+
+        Order matters. The control socket opens *first* so the operator can
+        unlock immediately -- notifying is never allowed to delay the thing
+        that ends the outage. The notice then goes out on a background
+        thread, because at boot the network is frequently not usable yet
+        (DNS especially, even after network-online.target), and this is the
+        one message whose loss leaves the operator unable to distinguish a
+        power cut from a compromise until a heartbeat fails to arrive hours
+        later.
+        """
         self.boot_info = self.unlock_manager.record_boot()
-        notice = render_locked_notice(
-            since=self.boot_info.locked_since, boot_count=self.boot_info.boot_count
-        )
-        boot_dispatcher = Dispatcher(self._boot_channels())
-        if boot_dispatcher.channel_names:
-            boot_dispatcher.dispatch(notice)
-        else:
-            logger.warning(
-                "No webhook secret configured; cannot announce the LOCKED state. "
-                "The operator will not know the service is waiting."
-            )
 
         self._control = ControlServer(self.config.control_socket_path, self.handle_command)
         self._control.start()
         self._write_snapshot(None)
+
+        boot_dispatcher = Dispatcher(self._boot_channels(), max_attempts=1)
+        if not boot_dispatcher.channel_names:
+            logger.warning(
+                "No webhook secret configured; cannot announce the LOCKED state. "
+                "The operator will not know the service is waiting."
+            )
+            return
+
+        notice = render_locked_notice(
+            since=self.boot_info.locked_since, boot_count=self.boot_info.boot_count
+        )
+        thread = threading.Thread(
+            target=self._announce_locked,
+            args=(boot_dispatcher, notice),
+            name="canaryew-boot-notice",
+            daemon=True,
+        )
+        thread.start()
+
+    def _announce_locked(self, dispatcher: Dispatcher, notice: Notification) -> None:
+        """Deliver the LOCKED notice, retrying patiently through a boot race.
+
+        Gives up only after ~5 minutes of widening attempts, and stops early
+        if the operator unlocks first -- a "come unlock me" that lands after
+        the fact is confusing noise.
+        """
+        for attempt, delay in enumerate(BOOT_NOTICE_BACKOFF, start=1):
+            if self._unlocked.is_set() or self._stop.is_set():
+                return
+            if dispatcher.dispatch(notice).delivered:
+                if attempt > 1:
+                    logger.info("LOCKED notice delivered on attempt %d", attempt)
+                return
+            logger.warning(
+                "LOCKED notice undelivered (attempt %d); retrying in %.0fs",
+                attempt,
+                delay,
+            )
+            if self._stop.wait(delay) or self._unlocked.is_set():
+                return
+        logger.critical(
+            "LOCKED notice could not be delivered. The service is running but "
+            "the operator has not been told it is waiting for a passphrase."
+        )
 
     def shutdown(self) -> None:
         self._stop.set()
