@@ -67,6 +67,7 @@ def test_default_form_matches_production_integration(monkeypatch) -> None:
     request = fake.requests[0]
     assert request.full_url == f"https://api.brrr.now/v1/{SECRET}"
     assert not request.has_header("Authorization")
+    assert request.get_header("User-agent") == "canaryew/0.1"  # not urllib's default
 
     payload = fake.payload()
     assert payload["title"] == "canaryEW ALERT"

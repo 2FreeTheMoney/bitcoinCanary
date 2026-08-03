@@ -96,7 +96,12 @@ class BrrrChannel:
         return self._url or f"{API_BASE}/{self._secret}"
 
     def _headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json"}
+        # Explicit User-Agent: WAFs commonly 403 urllib's default
+        # "Python-urllib/x.y" while letting named clients through.
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "canaryew/0.1",
+        }
         if self._use_bearer:
             headers["Authorization"] = f"Bearer {self._secret}"
         return headers
