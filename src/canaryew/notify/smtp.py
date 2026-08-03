@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from canaryew.config import SmtpSettings
-from canaryew.notify.base import DeliveryError, Notification
+from canaryew.notify.base import DeliveryError, Notification, RedactionTier
 
 if TYPE_CHECKING:
     from canaryew.notify.pgp import PgpEncryptor
@@ -101,6 +101,19 @@ class SmtpChannel:
     @property
     def enabled(self) -> bool:
         return self.disabled_reason is None
+
+    @property
+    def max_redaction(self) -> RedactionTier:
+        """How much detail this channel may carry.
+
+        FULL (txids, exact amounts) only when a PGP encryptor is attached:
+        without it the mail server and anyone who compromises it read the
+        body in the clear, which is the same exposure as the webhook. The
+        cap follows the *encryption*, not the channel type, so an operator
+        who sets FULL and later drops the PGP config silently gets less
+        detail rather than silently leaking it.
+        """
+        return RedactionTier.FULL if self._encryptor else RedactionTier.STANDARD
 
     # ------------------------------------------------------------- rendering --
 

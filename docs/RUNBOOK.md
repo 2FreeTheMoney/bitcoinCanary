@@ -104,8 +104,24 @@ Know exactly what each channel's transport can see:
 
 At the default `minimal` tier an alert carries: **the watch label you chose,
 a count** ("2 of 11 outputs"), **block height, timestamp, and your
-verification phrase**. `standard` adds coarse value buckets. `full` (PGP
-email only) adds txids and exact amounts.
+verification phrase**. `standard` adds coarse value buckets. `full` adds
+txids and exact amounts.
+
+**Raising the tier is safe once PGP is working**, because each channel is
+rendered separately and clamped to what it can protect. With
+`CANARYEW_REDACTION=full`:
+
+- **PGP-encrypted email** carries full detail — txids you can paste into a
+  block explorer and exact amounts, which is what you actually want at 03:00.
+- **The push** is still clamped to `standard`: value buckets, never txids.
+- **Unencrypted email** (no `CANARYEW_PGP_RECIPIENT`) is also clamped to
+  `standard`. The cap follows the encryption, not the channel, so removing
+  the PGP config quietly reduces detail instead of leaking it in the clear.
+
+The residual trade-off: full-tier alerts put txids in your mailbox, so an
+attacker who obtains both your mail *and* your PGP private key learns which
+coins were yours. Against that, an alert you can act on immediately. With a
+working PGP setup, `full` is the recommended tier.
 
 Therefore: **the watch `--label` is the one string of yours that rides
 through third-party infrastructure.** Choose labels you would be comfortable

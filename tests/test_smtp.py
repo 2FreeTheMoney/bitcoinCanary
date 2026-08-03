@@ -140,6 +140,37 @@ class FakeEncryptor:
         return "-----BEGIN PGP MESSAGE-----\nciphertext\n-----END PGP MESSAGE-----"
 
 
+def test_full_detail_requires_actual_encryption() -> None:
+    """The cap follows the encryption, not the channel type: dropping the PGP
+    config must reduce detail, never silently leak it in plaintext mail."""
+    from canaryew.notify.base import RedactionTier, cap_tier
+
+    encrypted = SmtpChannel(smtp_settings(), "pw", encryptor=FakeEncryptor())
+    plaintext = SmtpChannel(smtp_settings(), "pw")
+
+    assert encrypted.max_redaction is RedactionTier.FULL
+    assert plaintext.max_redaction is RedactionTier.STANDARD
+    assert cap_tier(RedactionTier.FULL, encrypted) is RedactionTier.FULL
+    assert cap_tier(RedactionTier.FULL, plaintext) is RedactionTier.STANDARD
+
+
+def test_encryption_failure_sends_nothing(tmp_path: Path) -> None:
+    """Fail closed: a gpg failure must not fall back to plaintext."""
+    from canaryew.notify.pgp import PgpError
+
+    class BrokenEncryptor:
+        def encrypt(self, plaintext: str) -> str:
+            raise PgpError("key expired")
+
+    outbox = tmp_path / "outbox.log"
+    channel = SmtpChannel(
+        SmtpSettings(mode="file", file_path=str(outbox)), encryptor=BrokenEncryptor()
+    )
+    with pytest.raises(PgpError):
+        channel.send(notification())
+    assert not outbox.exists()
+
+
 def test_encrypted_mail_hides_title_and_body(tmp_path: Path) -> None:
     """The mail server must see ciphertext and a generic subject only."""
     outbox = tmp_path / "outbox.log"
