@@ -321,7 +321,19 @@ def cmd_test_alert(config: Config, args: argparse.Namespace) -> int:
             "produces this: verify /opt/canaryew is up to date."
         )
 
-    result = Dispatcher(channels).dispatch(make_notification_test(keys.verification_phrase))
+    from canaryew.notify.base import Channel as ChannelProto
+    from canaryew.notify.base import RedactionTier, cap_tier
+
+    tier = RedactionTier(config.redaction)
+    label = state.watches[0].label if state.watches else "test-watch"
+    print(f"  redaction: {tier.value} (clamped per channel)")
+
+    def render_for(channel: ChannelProto):
+        return make_notification_test(
+            keys.verification_phrase, cap_tier(tier, channel), label
+        )
+
+    result = Dispatcher(channels).dispatch(render_for)
     for outcome in result.outcomes:
         status = "delivered" if outcome.delivered else f"FAILED ({outcome.error})"
         print(f"  {outcome.channel}: {status}")

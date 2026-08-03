@@ -27,13 +27,13 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Final
 
 from canaryew import heartbeat as hb
 from canaryew.config import Config
 from canaryew.control import ControlServer
 from canaryew.dispatch import Dispatcher
-from canaryew.monitor import Monitor, PassResult, SpendEvent, heartbeat_due
+from canaryew.monitor import Monitor, PassResult, Severity, SpendEvent, heartbeat_due
 from canaryew.node import BitcoinRpc
 from canaryew.notify.base import (
     Channel,
@@ -49,7 +49,7 @@ from canaryew.notify.pgp import PgpEncryptor
 from canaryew.notify.smtp import SmtpChannel
 from canaryew.secrets import SecretsError
 from canaryew.snapshot import write_snapshot
-from canaryew.store import StateStore
+from canaryew.store import StateStore, WatchedOutput
 from canaryew.unlock import BootInfo, LockedError, UnlockManager
 
 logger = logging.getLogger("canaryew.service")
@@ -340,18 +340,52 @@ class Service:
             logger.exception("unable to write status snapshot")
 
 
-def make_notification_test(verification_phrase: str) -> Notification:
-    """A deliberately-labeled test alert for the post-install drill."""
-    from canaryew.monitor import Severity
+TEST_TXID: Final[str] = "de" * 32
+"""Obviously synthetic outpoint for drills. Never a real txid."""
 
+
+def make_notification_test(
+    verification_phrase: str,
+    tier: RedactionTier = RedactionTier.MINIMAL,
+    watch_label: str = "test-watch",
+) -> Notification:
+    """A test alert rendered through the real spend pipeline.
+
+    Uses ``render_spend`` at the given tier so the drill shows exactly what a
+    genuine alert will look like on that channel -- including whether txids
+    and exact amounts actually arrive at FULL, which a fixed canned message
+    could never demonstrate.
+
+    The TEST banner leads the body because a phone notification previews the
+    first line: the operator must be able to tell a drill from the real thing
+    at a glance, without unlocking anything.
+    """
+    from canaryew.monitor import SpendEvent
+
+    event = SpendEvent(
+        watch_id="test",
+        watch_label=watch_label,
+        missing=[WatchedOutput(txid=TEST_TXID, vout=0, value_sat=12_345_678)],
+        total_outputs=3,
+        block_height=0,
+        detected_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    )
+    rendered = render_spend(event, verification_phrase, tier)
+    body = "\n".join(
+        [
+            # ASCII only: a single non-ASCII character (an em dash, say)
+            # pushes the whole message to base64 transfer encoding, which is
+            # unreadable raw and scores against deliverability.
+            "*** THIS IS A TEST - NOT A REAL SPEND ***",
+            "Triggered by 'canaryew test-alert'. The outpoint below is fake.",
+            "If you did not run that command just now, treat this as suspicious.",
+            "",
+            rendered.body,
+        ]
+    )
     return Notification(
-        title="canaryEW TEST alert",
-        body=(
-            "This is a TEST of the canaryEW alert path, triggered by the "
-            "operator.\n\n"
-            f"Verification: {verification_phrase}\n\n"
-            "If you did not run 'canaryew test-alert' just now, treat this "
-            "as suspicious."
-        ),
+        title="canaryEW TEST alert (not a real spend)",
+        body=body,
         severity=Severity.CRITICAL,
+        thread_id="canaryew-test",
     )

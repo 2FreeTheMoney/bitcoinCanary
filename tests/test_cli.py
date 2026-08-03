@@ -212,9 +212,36 @@ def test_test_alert_through_file_transport(home: Path, monkeypatch, capsys) -> N
     assert "smtp: delivered" in capsys.readouterr().out
 
     outbox = (home / "outbox.log").read_text()
-    assert "TEST" in outbox
+    # Unmistakably a drill, and the marker leads so a phone preview shows it.
+    assert "THIS IS A TEST" in outbox
+    assert outbox.index("THIS IS A TEST") < outbox.index("Verification:")
     # The test alert carries the verification phrase like a real one.
     assert "Verification:" in outbox
+
+
+def test_test_alert_reflects_the_configured_tier(home: Path, monkeypatch, capsys) -> None:
+    """The drill must show what a real alert looks like, or it proves nothing
+    about whether full detail actually arrives."""
+    from canaryew.service import TEST_TXID
+
+    monkeypatch.setenv("CANARYEW_SMTP_MODE", "file")
+    feed_passphrases(monkeypatch, PASSPHRASE, PASSPHRASE)
+    assert cli.main(["init"]) == 0
+
+    # minimal: no txid, no amounts
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["test-alert"]) == 0
+    minimal = (home / "outbox.log").read_text()
+    assert TEST_TXID not in minimal
+    (home / "outbox.log").unlink()
+
+    # full without PGP is clamped to standard: buckets, still no txid
+    monkeypatch.setenv("CANARYEW_REDACTION", "full")
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["test-alert"]) == 0
+    clamped = (home / "outbox.log").read_text()
+    assert TEST_TXID not in clamped
+    assert "BTC" in clamped        # value bucket appears at standard
 
 
 def test_test_alert_with_no_channels_fails(home: Path, monkeypatch, capsys) -> None:

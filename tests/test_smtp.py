@@ -92,6 +92,18 @@ def test_message_carries_deliverability_headers(tmp_path: Path) -> None:
     assert "+0000" in text and "-0000" not in text
 
 
+def test_body_stays_7bit_not_base64(tmp_path: Path) -> None:
+    """One non-ASCII character (an em dash) flips the whole message to base64,
+    which is unreadable raw and scores against deliverability."""
+    outbox = tmp_path / "outbox.log"
+    channel = SmtpChannel(SmtpSettings(mode="file", file_path=str(outbox)))
+    channel.send(notification())
+    text = outbox.read_text()
+    assert "Content-Transfer-Encoding: 7bit" in text
+    assert "base64" not in text
+    assert "body text" in text          # readable, not encoded
+
+
 def test_helo_name_defaults_to_sender_domain_not_local_fqdn() -> None:
     """smtplib would announce EHLO [127.0.1.1] on a typical Debian host."""
     channel = SmtpChannel(smtp_settings(from_addr="canary@example.org"), "pw")
