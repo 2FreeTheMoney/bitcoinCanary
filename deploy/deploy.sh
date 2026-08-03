@@ -30,6 +30,13 @@ install -d -o canaryew -g canaryew -m 0750 "$STATE_DIR"
 install -d -o root -g canaryew -m 0750 "$ENV_DIR"
 
 echo "== application =="
+# State the source and a content fingerprint: deploy.sh copies from its own
+# directory, so running an old copy of this script silently redeploys old
+# code. The fingerprint makes that visible instead of mysterious.
+SRC_SUM="$(find "$REPO_DIR/src" -type f -name '*.py' -exec sha256sum {} + \
+    | sort | sha256sum | cut -c1-12)"
+echo "  source:      $REPO_DIR"
+echo "  src digest:  $SRC_SUM"
 install -d -m 0755 "$APP_DIR"
 # Replace, never merge: a cp -R over an existing tree would leave files that
 # upstream deleted or renamed, and a stale module shadowing a new one is a

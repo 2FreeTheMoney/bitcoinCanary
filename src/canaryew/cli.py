@@ -294,6 +294,7 @@ def cmd_test_alert(config: Config, args: argparse.Namespace) -> int:
     except SecretsError as exc:
         raise CliError(str(exc)) from exc
 
+    print(config.describe_env_file())
     channels: list[Channel] = []
     encryptor = None
     if config.pgp_recipient and config.gnupg_home:
@@ -311,7 +312,14 @@ def cmd_test_alert(config: Config, args: argparse.Namespace) -> int:
         print(f"  config: {brrr.describe()}")
         channels.append(brrr)
     if not channels:
-        raise CliError("No channels configured; nothing to test.")
+        raise CliError(
+            "No channels configured; nothing to test.\n"
+            f"  {config.describe_env_file()}\n"
+            "  If that file was expected to supply CANARYEW_SMTP_* and "
+            "CANARYEW_BRRR_SECRET, check the path and that the current user "
+            "can read it. A deployment older than the env-file support also "
+            "produces this: verify /opt/canaryew is up to date."
+        )
 
     result = Dispatcher(channels).dispatch(make_notification_test(keys.verification_phrase))
     for outcome in result.outcomes:

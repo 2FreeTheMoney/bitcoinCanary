@@ -27,7 +27,7 @@ What belongs where:
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 
@@ -142,6 +142,19 @@ class Config:
     pgp_recipient: str = ""
     gnupg_home: Path | None = None
 
+    env_file: Path | None = None
+    """Env file consulted, if any. Provenance matters: a config silently
+    falling back to defaults looks identical to a config with nothing in it."""
+    env_file_loaded: bool = False
+
+    def describe_env_file(self) -> str:
+        """One line stating where configuration came from."""
+        if self.env_file is None:
+            return "env file: none consulted (explicit environment only)"
+        if self.env_file_loaded:
+            return f"env file: {self.env_file} (loaded)"
+        return f"env file: {self.env_file} (NOT FOUND OR UNREADABLE -- using defaults)"
+
 
 def load_config(environ: dict[str, str] | None = None) -> Config:
     """Build a :class:`Config` from the environment plus the env file.
@@ -158,18 +171,27 @@ def load_config(environ: dict[str, str] | None = None) -> Config:
     else:
         merged = dict(environ)
         env_file = merged.get("CANARYEW_ENV_FILE", "")
+    loaded = False
     if env_file:
-        for key, value in _read_env_file(Path(env_file)).items():
+        entries = _read_env_file(Path(env_file))
+        loaded = bool(entries)
+        for key, value in entries.items():
             merged.setdefault(key, value)
 
     saved = os.environ.copy()
     os.environ.clear()
     os.environ.update(merged)
     try:
-        return _build_config()
+        config = _build_config()
     finally:
         os.environ.clear()
         os.environ.update(saved)
+
+    return replace(
+        config,
+        env_file=Path(env_file) if env_file else None,
+        env_file_loaded=loaded,
+    )
 
 
 def _build_config() -> Config:

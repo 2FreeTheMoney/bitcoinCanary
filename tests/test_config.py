@@ -112,6 +112,25 @@ def test_missing_env_file_is_silently_ignored(tmp_path: Path) -> None:
     assert config.redaction == "minimal"
 
 
+def test_env_file_provenance_is_reported(tmp_path: Path) -> None:
+    """A silent fallback to defaults is indistinguishable from empty config,
+    so the loader records where configuration actually came from."""
+    env_file = tmp_path / "canaryew.env"
+    env_file.write_text("CANARYEW_BRRR_SECRET=abc\n")
+
+    loaded = load_config({"CANARYEW_ENV_FILE": str(env_file)})
+    assert loaded.env_file_loaded is True
+    assert "(loaded)" in loaded.describe_env_file()
+
+    missing = load_config({"CANARYEW_ENV_FILE": str(tmp_path / "absent.env")})
+    assert missing.env_file_loaded is False
+    assert "NOT FOUND" in missing.describe_env_file()
+
+    none_consulted = load_config({})
+    assert none_consulted.env_file is None
+    assert "none consulted" in none_consulted.describe_env_file()
+
+
 def test_explicit_environ_without_env_file_reads_no_file() -> None:
     """Tests and callers passing an explicit mapping stay hermetic even on a
     machine where /etc/canaryew/canaryew.env exists."""
