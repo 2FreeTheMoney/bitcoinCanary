@@ -67,17 +67,32 @@ docs/RUNBOOK.md  Operator setup incl. Sparrow UTXO export expectations
 
 Run tests: `./.venv/bin/python -m pytest tests/ -q`
 
+## Verified live on a real node (2026-08-03)
+
+First end-to-end deployment is done, and these are no longer theoretical:
+
+- **BIP-329 enrollment → import verification → monitoring.** A 19-output
+  labels export enrolled; import pruned 9 already-spent outputs as wallet
+  history and watched the 10 still unspent, matching the wallet exactly.
+  Sparrow's BIP-329 labels export is confirmed to exist and to include spent
+  outputs; a dedicated UTXO-set CSV export is NOT confirmed in current
+  Sparrow — the CSV parser stays for other tools, but BIP-329 is the primary
+  documented path.
+- **PGP-encrypted SMTP delivery**, with the password from the sealed store.
+- **brrr push at `critical`**, confirmed to break through a phone's silent
+  mode. The full payload (`thread_id`/`sound`/`volume`) is accepted in
+  practice, not just the minimal corroborated core.
+- **Detection loop against live bitcoind**, cookie auth via a shared group,
+  heartbeat seq 1 emitted, snapshot and control socket working.
+
+Still unexercised in production: the reboot drill (runbook section 9 —
+LOCKED notice, then unlock), a real spend alert, and `ack` + re-enrollment.
+
 ## Sensible next steps, in rough order
 
-1. **Deploy to the actual node** and run the runbook end-to-end (sections
-   3–9). The brrr endpoint/payload shape is corroborated against a working
-   production integration (URL-path form,
-   `title`/`message`/`interruption_level`); the uncorroborated extras
-   (`thread_id`/`sound`/`volume`) degrade gracefully via a minimal-payload
-   retry on 4xx. Sparrow's BIP-329 labels export is confirmed real (operator
-   verified); a dedicated UTXO-set CSV export is NOT confirmed to exist in
-   current Sparrow — the CSV parser stays for other tools, but docs treat
-   BIP-329 as the primary path.
+1. **Run the reboot drill** (runbook section 9): confirm the LOCKED notice
+   arrives over the webhook before unlock, since that notice is what makes
+   passphrase-on-start survivable.
 2. **`canaryew verify-heartbeat`** — paste seq/ts/mac (+ digest from
    `/api/heartbeat/latest`) and check it offline. The primitives exist in
    `heartbeat.py`; only the CLI surface is missing.

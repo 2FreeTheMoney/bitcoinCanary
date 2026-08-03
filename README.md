@@ -60,12 +60,17 @@ Implemented and tested end to end:
 | Unlock lifecycle + control socket + LOCKED boot notice | done, tested |
 | Operator CLI (init/enroll/import/unlock/status/ack/test-alert) | done, tested |
 | Keyless FastAPI status surface | done, tested |
-| systemd units + deploy.sh + nginx | done |
+| systemd units + deploy.sh + nginx | done, deployed |
 | On-host enrollment (`scantxoutset`) | deferred by decision |
+
+Verified end to end on a live node: enrollment from a Sparrow BIP-329 export,
+import-time pruning of already-spent outputs, monitoring against bitcoind,
+PGP-encrypted mail, and a `critical` push that breaks through a silenced
+phone.
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture and
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md) for operator setup, including the
-Sparrow UTXO export flow and what to expect from it.
+Sparrow export flow and what to expect from it.
 
 ## Quick start (development)
 
