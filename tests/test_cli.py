@@ -166,6 +166,105 @@ def test_import_no_verify_skips_the_node(home: Path, monkeypatch, capsys) -> Non
     assert state.watch("w-vault").total_outputs == 3
 
 
+def test_reenrollment_replaces_the_same_watch(home: Path, monkeypatch, capsys) -> None:
+    """The normal post-spend / post-deposit flow: same wallet, new outputs."""
+    watchfile = _prepared_watchfile(home, monkeypatch, capsys)
+    monkeypatch.setattr(cli, "_make_rpc", lambda config: FakeRpc())
+
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["import", "--watchfile", str(watchfile)]) == 0
+    capsys.readouterr()
+
+    # Same id without --replace is refused, with direction.
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["import", "--watchfile", str(watchfile)]) == 1
+    assert "--replace" in capsys.readouterr().err
+
+    # A fresh export of the same wallet, now with different outputs.
+    export = home / "after.txt"
+    export.write_text(f"{TXID_B}:7\n")
+    new_watchfile = home / "after.watchfile"
+    feed_passphrases(monkeypatch, PASSPHRASE, PASSPHRASE)
+    assert cli.main([
+        "enroll", "--export", str(export), "--label", "vault",
+        "--out", str(new_watchfile), "--watch-id", "w-vault",
+    ]) == 0
+    capsys.readouterr()
+
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["import", "--watchfile", str(new_watchfile), "--replace"]) == 0
+    assert "Replacing watch 'w-vault': 3 outputs -> 1" in capsys.readouterr().out
+
+    _, state = StateStore(home / "state.json").unlock(PASSPHRASE)
+    assert len(state.watches) == 1              # replaced, not duplicated
+    assert state.watch("w-vault").total_outputs == 1
+
+
+def test_replace_refuses_to_discard_an_active_alarm(home: Path, monkeypatch, capsys) -> None:
+    """Re-enrolling must never be a back door around 'never auto-clear'."""
+    watchfile = _prepared_watchfile(home, monkeypatch, capsys)
+    monkeypatch.setattr(cli, "_make_rpc", lambda config: FakeRpc())
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["import", "--watchfile", str(watchfile)]) == 0
+
+    # Simulate a detected spend that the operator has not acknowledged.
+    keys, state = StateStore(home / "state.json").unlock(PASSPHRASE)
+    state.watch("w-vault").outputs[0].present = False
+    StateStore(home / "state.json").save(keys, state)
+    capsys.readouterr()
+
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["import", "--watchfile", str(watchfile), "--replace"]) == 1
+    error = capsys.readouterr().err
+    assert "not acknowledged" in error and "canaryew ack" in error
+
+    # --force is the deliberate override.
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main([
+        "import", "--watchfile", str(watchfile), "--replace", "--force"
+    ]) == 0
+
+
+def test_remove_watch(home: Path, monkeypatch, capsys) -> None:
+    watchfile = _prepared_watchfile(home, monkeypatch, capsys)
+    monkeypatch.setattr(cli, "_make_rpc", lambda config: FakeRpc())
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["import", "--watchfile", str(watchfile)]) == 0
+    capsys.readouterr()
+
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["remove-watch", "--watch", "nope"]) == 1
+    assert "Known watches: w-vault" in capsys.readouterr().err
+
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["remove-watch", "--watch", "w-vault"]) == 0
+    out = capsys.readouterr().out
+    assert "Removed watch 'w-vault'" in out
+    assert "No watches remain" in out
+
+    _, state = StateStore(home / "state.json").unlock(PASSPHRASE)
+    assert state.watches == []
+
+
+def test_remove_watch_guards_unacknowledged_alerts(home: Path, monkeypatch, capsys) -> None:
+    watchfile = _prepared_watchfile(home, monkeypatch, capsys)
+    monkeypatch.setattr(cli, "_make_rpc", lambda config: FakeRpc())
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["import", "--watchfile", str(watchfile)]) == 0
+
+    keys, state = StateStore(home / "state.json").unlock(PASSPHRASE)
+    state.watch("w-vault").outputs[0].present = False
+    StateStore(home / "state.json").save(keys, state)
+    capsys.readouterr()
+
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["remove-watch", "--watch", "w-vault"]) == 1
+    assert "not acknowledged" in capsys.readouterr().err
+
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["remove-watch", "--watch", "w-vault", "--force"]) == 0
+
+
 def test_import_refused_while_service_running(home: Path, monkeypatch, capsys) -> None:
     feed_passphrases(monkeypatch, PASSPHRASE, PASSPHRASE)
     assert cli.main(["init"]) == 0

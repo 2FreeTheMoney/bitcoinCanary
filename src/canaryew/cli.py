@@ -168,18 +168,72 @@ def cmd_import(config: Config, args: argparse.Namespace) -> int:
     except SecretsError as exc:
         raise CliError(str(exc)) from exc
 
-    if state.watch(watch.watch_id) is not None:
-        raise CliError(
-            f"Watch id {watch.watch_id!r} already exists in the store. "
-            "Re-enrolling a wallet replaces it: remove the old watch first "
-            "or export with a new --watch-id."
+    existing = state.watch(watch.watch_id)
+    if existing is not None:
+        if not args.replace:
+            raise CliError(
+                f"Watch id {watch.watch_id!r} already exists in the store. "
+                "Re-enrolling the same wallet is normal after a spend or a "
+                "deposit -- pass --replace to swap it in place, or export "
+                "with a new --watch-id to keep both."
+            )
+        unacknowledged = existing.unacknowledged_missing
+        if unacknowledged and not args.force:
+            raise CliError(
+                f"Watch {watch.watch_id!r} has {len(unacknowledged)} flagged "
+                "output(s) you have not acknowledged. Replacing it would "
+                "discard an active alarm.\n"
+                f"  If you authorized that spend: canaryew ack --watch {watch.watch_id}\n"
+                "  If you did not: treat it as an incident, not a re-enrollment.\n"
+                "  --force overrides, and is almost never what you want."
+            )
+        print(
+            f"Replacing watch {watch.watch_id!r}: "
+            f"{existing.total_outputs} outputs -> {watch.total_outputs}"
         )
+        state.watches = [w for w in state.watches if w.watch_id != watch.watch_id]
 
     state.watches.append(watch)
     store.save(keys, state)
     print(f"Imported watch {watch.watch_id!r} ({watch.total_outputs} outputs).")
     print(f"  Fingerprint verified: {fingerprint}")
     print("Restart or unlock the service to begin monitoring it.")
+    return 0
+
+
+def cmd_remove_watch(config: Config, args: argparse.Namespace) -> int:
+    """Retire a watch entirely (wallet emptied, or watched elsewhere now)."""
+    _refuse_if_service_running(config, "remove-watch")
+    store = StateStore(config.state_path)
+    if not store.exists():
+        raise CliError(f"No store at {config.state_path}. Run 'canaryew init' first.")
+
+    passphrase = _prompt_passphrase()
+    try:
+        keys, state = store.unlock(passphrase)
+    except SecretsError as exc:
+        raise CliError(str(exc)) from exc
+
+    watch = state.watch(args.watch)
+    if watch is None:
+        known = ", ".join(w.watch_id for w in state.watches) or "(none)"
+        raise CliError(f"No watch {args.watch!r} in the store. Known watches: {known}")
+
+    unacknowledged = watch.unacknowledged_missing
+    if unacknowledged and not args.force:
+        raise CliError(
+            f"Watch {args.watch!r} has {len(unacknowledged)} flagged output(s) "
+            "you have not acknowledged. Removing it would discard an active "
+            "alarm.\n"
+            f"  If you authorized that spend: canaryew ack --watch {args.watch}\n"
+            "  --force overrides, and is almost never what you want."
+        )
+
+    state.watches = [w for w in state.watches if w.watch_id != args.watch]
+    store.save(keys, state)
+    print(f"Removed watch {args.watch!r} ({watch.total_outputs} outputs).")
+    if not state.watches:
+        print("No watches remain. The monitor will run but has nothing to check.")
     return 0
 
 
@@ -419,6 +473,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="skip checking outputs against the node (already-spent outputs "
         "will then alert on the first monitoring pass)",
     )
+    p_import.add_argument(
+        "--replace",
+        action="store_true",
+        help="replace an existing watch with the same id (normal after a "
+        "spend or deposit)",
+    )
+    p_import.add_argument(
+        "--force",
+        action="store_true",
+        help="with --replace, discard unacknowledged alerts on the old watch",
+    )
+
+    p_remove = sub.add_parser("remove-watch", help="retire a watch entirely")
+    p_remove.add_argument("--watch", required=True, help="watch id to remove")
+    p_remove.add_argument(
+        "--force", action="store_true", help="remove even with unacknowledged alerts"
+    )
 
     sub.add_parser("unlock", help="unlock the running service with your passphrase")
     sub.add_parser("status", help="show service status")
@@ -448,6 +519,7 @@ _COMMANDS = {
     "init": cmd_init,
     "enroll": cmd_enroll,
     "import": cmd_import,
+    "remove-watch": cmd_remove_watch,
     "unlock": cmd_unlock,
     "status": cmd_status,
     "ack": cmd_ack,

@@ -176,7 +176,7 @@ to exist in current Sparrow.
   now. Consequences:
   - Any later *deliberate spend* from the wallet **will trigger a critical
     alert**. That is correct behavior, not a false positive — acknowledge it
-    and re-enroll (section 11).
+    and re-enroll (section 12).
   - *Deposits* after enrollment are **not** watched. Deposit detection is off
     by design (it would require storing future addresses). After any planned
     deposit, re-export and re-enroll.
@@ -354,7 +354,73 @@ Sparrow, re-enroll, re-import — your new outputs are not watched until you do.
 A spend alert never clears itself. Silence after an alert means the alert
 still stands.
 
-## 12. Planned node maintenance
+## 12. Transacting with a watched wallet
+
+canaryEW watches a *snapshot* of outpoints, so normal wallet activity needs a
+re-enrollment. Two cases, and they behave differently.
+
+**Leave the service running while you transact.** Stopping it first would
+avoid an alert, but it builds exactly the wrong habit: silencing the alarm
+before touching the wallet is the behavior an attacker needs you to have. The
+alert on your own spend is correct, and it is the only chance you get to
+rehearse a real one.
+
+### 12a. Receiving coins (exchange withdrawal, any deposit)
+
+Nothing you already watch is spent, so **no alert fires** — the new coins are
+simply unwatched until you re-enroll. There is no hurry and no alarm.
+
+1. Wait for the deposit to confirm.
+2. On the trusted machine: re-export labels from Sparrow, then
+   `canaryew enroll --export labels.jsonl --label solo --out solo.watchfile
+   --watch-id solo` — **the same `--watch-id`**.
+3. Copy the watchfile to the node.
+4. `sudo systemctl stop canaryew`  (the running service holds its own copy of
+   the state and would overwrite the change)
+5. `canaryew import --watchfile solo.watchfile --replace`
+6. `sudo systemctl start canaryew && canaryew unlock`
+
+Step 5 prints `Replacing watch 'solo': 10 outputs -> 11` and verifies every
+outpoint against the node first, so the count is your confirmation that the
+deposit is now covered.
+
+### 12b. Spending or consolidating
+
+Watched outputs disappear, so **you will get a CRITICAL alert** within one
+poll interval — and because detection is mempool-aware, usually before the
+transaction confirms. That is correct behavior, not a false positive.
+
+1. Broadcast the transaction. Expect the alert; read it and confirm the
+   verification phrase is present (a free authenticity drill).
+2. `canaryew ack --watch solo` — you are asserting "this was me". The flagged
+   outputs stay recorded as spent; only the alarm state clears.
+3. Wait for the transaction to **confirm** before re-enrolling. Enrolling an
+   unconfirmed output risks a replacement or drop turning it into an instant
+   false alert.
+4. Re-export, re-enroll with the same `--watch-id`, and import as in 12a
+   steps 2–6.
+
+Acknowledging first is enforced, not merely advised: `--replace` refuses to
+overwrite a watch that still has unacknowledged flagged outputs, because
+re-enrollment must never become a back door around "never auto-clear". If
+you genuinely did not authorize the spend, that refusal is the point — treat
+it as an incident (section 11), not as paperwork.
+
+If you use a BIP-329 labels export, the file will contain the now-spent
+outputs alongside the new ones. That is fine: import verifies against the
+node and drops them as history, which is exactly the pruning described in 6c.
+
+### 12c. Retiring a wallet
+
+If a wallet is emptied or you stop watching it:
+
+```bash
+sudo systemctl stop canaryew
+canaryew remove-watch --watch solo          # refuses if alerts are unacked
+sudo systemctl start canaryew && canaryew unlock
+```
+
+## 13. Planned node maintenance
 
 canaryEW cannot tell your maintenance from an attack, and by design it errs
 loud. Expect this during planned work:
@@ -378,7 +444,7 @@ Stopping is the honest option only because *you* know why the heartbeat
 stopped. Never leave it stopped: a silent canaryEW is indistinguishable from
 a suppressed one, which is the state this project exists to make impossible.
 
-## 13. Routine maintenance
+## 14. Routine maintenance
 
 - **Rotate the brrr secret**: update `canaryew.env`, restart the service.
 - **Change SMTP password**: `canaryew set-smtp-password` (service stopped).

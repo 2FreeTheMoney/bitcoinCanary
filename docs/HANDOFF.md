@@ -54,7 +54,7 @@ src/canaryew/
   service.py     Run loop: pass -> alerts -> heartbeat -> save -> snapshot
   snapshot.py    Redacted status file bridging monitor -> keyless web
   cli.py         init/enroll/import/unlock/status/ack/set-smtp-password/
-                 pgp-import/test-alert/run
+                 pgp-import/test-alert/run/remove-watch
   notify/base.py Notification model, redaction tiers, renderers
   notify/brrr.py brrr.now channel, severity -> interruption level
   notify/smtp.py smtp|console|file|disabled, production mailer hardening
@@ -101,14 +101,12 @@ LOCKED notice, then unlock), a real spend alert, and `ack` + re-enrollment.
 2. **`canaryew verify-heartbeat`** — paste seq/ts/mac (+ digest from
    `/api/heartbeat/latest`) and check it offline. The primitives exist in
    `heartbeat.py`; only the CLI surface is missing.
-3. **Watch removal / replacement** (`canaryew remove-watch`) to complete the
-   re-enrollment loop without manual store surgery.
-4. **tpm2 unlock provider** — the provider seam exists conceptually
+3. **tpm2 unlock provider** — the provider seam exists conceptually
    (DESIGN S6 table); nothing is pluggable in code yet.
-5. **On-host enrollment** via `scantxoutset` if the operator ever wants it —
+4. **On-host enrollment** via `scantxoutset` if the operator ever wants it —
    `node.scan_txout_set` and `descriptor_info` are already implemented and
    deliberately unused.
-6. Consider a `Restart=` watchdog integration (systemd `WatchdogSec` +
+5. Consider a `Restart=` watchdog integration (systemd `WatchdogSec` +
    `sd_notify`) so a hung (not dead) loop also gets restarted.
 
 ## Operator-specific context
