@@ -56,6 +56,10 @@ logger = logging.getLogger("canaryew.service")
 
 DEGRADED_GRACE_SECONDS_DEFAULT = 1800.0
 
+BOOT_NOTICE_EXIT_GRACE_SECONDS: Final[float] = 20.0
+"""How long a failing startup waits for the LOCKED notice to get out before
+the process dies and takes its daemon thread with it."""
+
 BOOT_NOTICE_BACKOFF: Final[tuple[float, ...]] = (5.0, 10.0, 20.0, 30.0, 60.0, 60.0, 60.0)
 """Waits between LOCKED-notice attempts (~4.5 minutes total). Deliberately
 patient: at boot the network is often unusable for the first minute, and a
@@ -145,28 +149,54 @@ class Service:
         """
         self.boot_info = self.unlock_manager.record_boot()
 
-        self._control = ControlServer(self.config.control_socket_path, self.handle_command)
-        self._control.start()
+        # Announcing comes first because it is asynchronous and therefore
+        # free: nothing later in startup is delayed by it, and if control
+        # socket setup then fails, the operator still learns the service is
+        # down. Silence on a failed startup would be the worst outcome --
+        # the state this project exists to make impossible.
+        notice_thread = self._start_boot_notice()
+
+        try:
+            self._control = ControlServer(
+                self.config.control_socket_path, self.handle_command
+            )
+            self._control.start()
+        except Exception:
+            logger.critical(
+                "Control socket %s could not be opened; the service cannot be "
+                "unlocked and is exiting. A LOCKED notice was attempted.",
+                self.config.control_socket_path,
+            )
+            if notice_thread is not None:
+                # Give the notice a chance to leave before the process dies:
+                # it is a daemon thread and would be killed on exit.
+                notice_thread.join(timeout=BOOT_NOTICE_EXIT_GRACE_SECONDS)
+            raise
+
         self._write_snapshot(None)
 
-        boot_dispatcher = Dispatcher(self._boot_channels(), max_attempts=1)
-        if not boot_dispatcher.channel_names:
+    def _start_boot_notice(self) -> threading.Thread | None:
+        """Begin delivering the LOCKED notice in the background."""
+        assert self.boot_info is not None
+        dispatcher = Dispatcher(self._boot_channels(), max_attempts=1)
+        if not dispatcher.channel_names:
             logger.warning(
                 "No webhook secret configured; cannot announce the LOCKED state. "
                 "The operator will not know the service is waiting."
             )
-            return
+            return None
 
         notice = render_locked_notice(
             since=self.boot_info.locked_since, boot_count=self.boot_info.boot_count
         )
         thread = threading.Thread(
             target=self._announce_locked,
-            args=(boot_dispatcher, notice),
+            args=(dispatcher, notice),
             name="canaryew-boot-notice",
             daemon=True,
         )
         thread.start()
+        return thread
 
     def _announce_locked(self, dispatcher: Dispatcher, notice: Notification) -> None:
         """Deliver the LOCKED notice, retrying patiently through a boot race.

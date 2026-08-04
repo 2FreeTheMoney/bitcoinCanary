@@ -114,32 +114,66 @@ def test_boot_notice_retries_through_a_network_outage(home: Path, monkeypatch) -
         service.shutdown()
 
 
-def test_control_socket_opens_before_the_boot_notice(home: Path, monkeypatch) -> None:
-    """Notifying must never delay the operator's ability to unlock."""
+def test_slow_channel_does_not_delay_unlock(home: Path, monkeypatch) -> None:
+    """Notifying must never delay the operator's ability to end the outage.
+    The notice is dispatched first (so a control-socket failure still alerts)
+    but asynchronously, so a hanging channel cannot hold the socket hostage."""
     config = load_config({"CANARYEW_HOME": str(home)})
     StateStore(config.state_path).initialize(PASSPHRASE)
     service = Service(config, rpc=FakeRpc())
 
-    socket_ready_when_sending: list[bool] = []
+    class HangingChannel:
+        name = "hanging"
+
+        def send(self, notification) -> None:
+            time.sleep(30)      # a channel that never answers
+
+        def healthy(self) -> bool:
+            return True
+
+    monkeypatch.setattr(service, "_boot_channels", lambda: [HangingChannel()])
+    try:
+        started = time.monotonic()
+        service.startup()
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 5                                   # did not block
+        assert config.control_socket_path.exists()           # unlock available now
+        assert service.handle_command(
+            {"command": "unlock", "passphrase": PASSPHRASE}
+        )["ok"]
+    finally:
+        service.shutdown()
+
+
+def test_control_socket_failure_still_alerts(home: Path, monkeypatch) -> None:
+    """A startup that cannot open its control socket must not die silently:
+    the operator has to learn the service is down (silence is the alarm)."""
+    import canaryew.service as service_mod
+
+    sent: list[str] = []
 
     class ObservingChannel:
         name = "observer"
 
         def send(self, notification) -> None:
-            socket_ready_when_sending.append(config.control_socket_path.exists())
+            sent.append(notification.title)
 
         def healthy(self) -> bool:
             return True
 
+    def exploding_server(*args, **kwargs):
+        raise OSError("address already in use")
+
+    config = load_config({"CANARYEW_HOME": str(home)})
+    StateStore(config.state_path).initialize(PASSPHRASE)
+    service = Service(config, rpc=FakeRpc())
     monkeypatch.setattr(service, "_boot_channels", lambda: [ObservingChannel()])
-    try:
-        service.startup()
-        deadline = time.monotonic() + 5
-        while not socket_ready_when_sending and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert socket_ready_when_sending == [True]
-    finally:
-        service.shutdown()
+    monkeypatch.setattr(service_mod, "ControlServer", exploding_server)
+
+    with pytest.raises(OSError, match="address already in use"):
+        service.startup()          # fails loudly, as it must
+    assert sent and "LOCKED" in sent[0]   # but not before alerting
 
 
 def test_boot_notice_stops_once_unlocked(home: Path, monkeypatch) -> None:

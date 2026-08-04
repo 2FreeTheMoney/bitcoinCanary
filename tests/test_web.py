@@ -18,7 +18,29 @@ from canaryew.web.app import create_app
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch) -> TestClient:
     monkeypatch.setenv("CANARYEW_HOME", str(tmp_path))
+    monkeypatch.setenv("CANARYEW_ENV_FILE", "")   # as the unit runs it: no shared config
     return TestClient(create_app())
+
+
+def test_web_process_holds_no_secrets(tmp_path: Path, monkeypatch) -> None:
+    """The keyless boundary: with CANARYEW_ENV_FILE cleared -- exactly how the
+    systemd unit runs it -- the app cannot pick up the shared secrets file."""
+    from canaryew.config import load_config
+
+    env_file = tmp_path / "canaryew.env"
+    env_file.write_text("CANARYEW_BRRR_SECRET=super-secret\nCANARYEW_RPC_PASSWORD=pw\n")
+
+    config = load_config({"CANARYEW_ENV_FILE": "", "CANARYEW_HOME": str(tmp_path)})
+    assert config.brrr_secret == ""
+    assert config.bitcoin_rpc_password == ""
+
+
+def test_snapshot_is_readable_without_group_membership(tmp_path: Path) -> None:
+    """The web user has no membership in the monitor's group, so the snapshot
+    must be world-readable -- it is redacted by construction."""
+    path = tmp_path / "status.json"
+    write_snapshot(path, {"locked": False})
+    assert path.stat().st_mode & 0o004
 
 
 def _iso(moment: datetime) -> str:

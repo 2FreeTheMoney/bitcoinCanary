@@ -19,7 +19,15 @@ from typing import Any
 
 
 def write_snapshot(path: str | Path, payload: dict[str, Any]) -> None:
-    """Atomically replace the snapshot file (0640)."""
+    """Atomically replace the snapshot file (0644).
+
+    World-readable on purpose. The contents are redacted at the source --
+    counts, heights, timestamps, and a heartbeat MAC that already travels in
+    notifications -- so there is nothing here to protect. Keeping it readable
+    lets the status web process run as its own user with no group membership
+    in the monitor's group, which is what keeps that process genuinely
+    keyless: it never needs access to anything else the monitor owns.
+    """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     handle, temp_path = tempfile.mkstemp(
@@ -28,7 +36,7 @@ def write_snapshot(path: str | Path, payload: dict[str, Any]) -> None:
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as stream:
             json.dump(payload, stream, separators=(",", ":"))
-        os.chmod(temp_path, 0o640)
+        os.chmod(temp_path, 0o644)
         os.replace(temp_path, target)
     except Exception:
         Path(temp_path).unlink(missing_ok=True)

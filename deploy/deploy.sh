@@ -15,8 +15,16 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 echo "== users and groups =="
 id -u canaryew >/dev/null 2>&1 || useradd --system --home-dir "$STATE_DIR" \
     --shell /usr/sbin/nologin canaryew
+# The status web user gets NO membership in the canaryew group: it must not
+# be able to read the env file (brrr secret, RPC credentials) or anything
+# else the monitor owns. It reads only the world-readable snapshot.
 id -u canaryew-web >/dev/null 2>&1 || useradd --system --no-create-home \
-    --shell /usr/sbin/nologin --groups canaryew canaryew-web
+    --shell /usr/sbin/nologin canaryew-web
+# Undo the group membership shipped by earlier versions of this script.
+if id -nG canaryew-web 2>/dev/null | tr ' ' '\n' | grep -qx canaryew; then
+    gpasswd -d canaryew-web canaryew >/dev/null
+    echo "  removed canaryew-web from group canaryew (it needs no secrets)"
+fi
 # Read access to bitcoind's RPC cookie:
 if getent group bitcoin >/dev/null 2>&1; then
     usermod -aG bitcoin canaryew
@@ -65,7 +73,14 @@ echo "== systemd =="
 install -m 0644 "$REPO_DIR/deploy/canaryew.service" /etc/systemd/system/
 install -m 0644 "$REPO_DIR/deploy/canaryew-web.service" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable canaryew.service canaryew-web.service
+systemctl enable canaryew.service
+# The web status surface is optional and NOT enabled by default: everything
+# it shows is available from `canaryew status`, so it is a listening socket
+# most operators do not need. Enable deliberately:
+#     sudo systemctl enable --now canaryew-web
+if systemctl is-enabled --quiet canaryew-web.service 2>/dev/null; then
+    echo "  canaryew-web is enabled; restart it to pick up this deploy"
+fi
 
 # Deliberately no automatic restart: bouncing a security monitor is the
 # operator's call, made when they are ready to unlock immediately after.

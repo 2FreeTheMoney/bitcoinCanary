@@ -310,10 +310,19 @@ access is wanted.
 - `GET /api/status` — redacted operational status (+ snapshot staleness flag)
 - `GET /api/heartbeat/latest` — last heartbeat seq/ts/mac for manual verification
 
+**Optional.** Everything it serves is available from `canaryew status`, so it
+is not enabled by default: an unused listening socket is attack surface
+bought for nothing. Enable it only if browser access is wanted.
+
 **The web process is keyless by construction.** The monitor writes a redacted
 snapshot file (counts, heights, timestamps, heartbeat seq/MAC — nothing else);
-the web app only reads that file, runs as a separate user, and holds no
-passphrase, no keys, no RPC credentials, and no control-socket access.
+the web app only reads that file, runs as a separate user *with no membership
+in the monitor's group*, and holds no passphrase, no keys, no RPC
+credentials, and no control-socket access. Critically its unit does **not**
+load the shared `EnvironmentFile`: systemd reads that as root and injects it
+into the process environment, so loading it would hand the webhook secret and
+RPC credentials to this process regardless of file permissions. The snapshot
+is world-readable precisely so this process needs no other access.
 Compromising it yields information the operator would read out loud anyway.
 Because the snapshot carries nothing sensitive, the endpoints need no session
 auth; LAN exposure policy is nginx's problem.

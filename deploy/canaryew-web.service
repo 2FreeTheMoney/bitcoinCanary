@@ -1,19 +1,31 @@
-# canaryEW status surface: a separate, keyless process.
+# canaryEW status surface: a separate, keyless process. OPTIONAL.
 #
 # It reads the redacted snapshot file and nothing else -- no passphrase, no
-# control socket, no RPC credentials. Runs as its own user so that even this
-# process's compromise cannot reach the monitor's state directory beyond the
-# world-readable-by-group snapshot.
+# keys, no control socket, no RPC credentials, no webhook secret. Everything
+# it serves is also available from `canaryew status`; this unit exists only
+# for at-a-glance access from a browser. If you do not want that, leave it
+# disabled: it is a listening socket you do not need.
+#
+# NOTE the deliberate absence of EnvironmentFile=/etc/canaryew/canaryew.env.
+# systemd reads that file as root and injects its contents into the process
+# environment, so loading it here would hand the brrr secret and any RPC
+# credentials to this process no matter how the file is permissioned --
+# destroying the keyless boundary that is this unit's entire justification.
+# Only the snapshot path is passed, explicitly.
 
 [Unit]
-Description=canaryEW status web surface (keyless)
+Description=canaryEW status web surface (keyless, optional)
 After=network-online.target canaryew.service
 
 [Service]
 Type=simple
 User=canaryew-web
-Group=canaryew
-EnvironmentFile=/etc/canaryew/canaryew.env
+Group=canaryew-web
+Environment=CANARYEW_SNAPSHOT_PATH=/var/lib/canaryew/status.json
+# Consulting the shared env file is refused for the reason above; an empty
+# path disables the lookup that would otherwise find it at its default
+# location.
+Environment=CANARYEW_ENV_FILE=
 ExecStart=/opt/canaryew/.venv/bin/uvicorn --factory canaryew.web.app:create_app \
     --host 127.0.0.1 --port 8791
 Restart=always
@@ -26,6 +38,9 @@ PrivateTmp=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 RestrictSUIDSGID=true
+# Read-only view of the state directory; it can see the snapshot and nothing
+# it does not already have permission to read.
+ReadOnlyPaths=/var/lib/canaryew
 
 [Install]
 WantedBy=multi-user.target
