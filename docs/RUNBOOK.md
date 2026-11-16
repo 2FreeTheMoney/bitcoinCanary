@@ -75,6 +75,16 @@ canaryew init
 a spend alert silently downgrades to an ordinary notification and will not
 break through Do Not Disturb — which defeats the reason this channel exists.
 
+To use a brrr.now-compatible service, set `CANARYEW_BRRR_API_BASE` in
+`canaryew.env` to its API base URL, including the version path but not the
+secret or `/send`. Unset or blank keeps the default `https://api.brrr.now/v1`;
+a trailing slash is accepted. With a bare `CANARYEW_BRRR_SECRET`, delivery
+appends `/<secret>` to the base. An existing full webhook URL in
+`CANARYEW_BRRR_SECRET` still overrides the delivery URL. Health checks use
+the configured base. The setting applies to LOCKED boot notices, regular
+alerts, and `canaryew test-alert`. Restart the service after changing it,
+then run `canaryew test-alert` to verify delivery.
+
 **SMTP password** (goes in the sealed store, not the env file):
 
 ```bash

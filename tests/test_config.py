@@ -22,6 +22,22 @@ def test_defaults_are_sane() -> None:
     assert config.bitcoin_rpc_url == "http://127.0.0.1:8332"
     assert config.bitcoin_rpc_cookie_file is not None  # cookie auth by default
     assert config.brrr_secret == ""
+    assert config.brrr_api_base == "https://api.brrr.now/v1"
+
+
+def test_brrr_api_base_override_and_blank_default() -> None:
+    config = load_config({"CANARYEW_BRRR_API_BASE": " https://notify.example.invalid/api/v1/ "})
+    assert config.brrr_api_base == "https://notify.example.invalid/api/v1/"
+    assert load_config({"CANARYEW_BRRR_API_BASE": " "}).brrr_api_base == "https://api.brrr.now/v1"
+
+
+def test_brrr_api_base_env_file_and_environment_precedence(tmp_path: Path) -> None:
+    env_file = tmp_path / "canaryew.env"
+    env_file.write_text("CANARYEW_BRRR_API_BASE=https://notify.example.invalid/v1\n")
+    environ = {"CANARYEW_ENV_FILE": str(env_file)}
+    assert load_config(environ).brrr_api_base == "https://notify.example.invalid/v1"
+    environ["CANARYEW_BRRR_API_BASE"] = "https://override.example.invalid/v2"
+    assert load_config(environ).brrr_api_base == "https://override.example.invalid/v2"
 
 
 def test_overrides_and_paths_derive_from_home() -> None:

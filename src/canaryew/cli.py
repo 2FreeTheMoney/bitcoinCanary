@@ -359,7 +359,7 @@ def cmd_test_alert(config: Config, args: argparse.Namespace) -> int:
     elif config.smtp.mode != "disabled":
         print(f"SMTP channel disabled: {smtp.disabled_reason}")
     if config.brrr_secret:
-        brrr = BrrrChannel(config.brrr_secret)
+        brrr = BrrrChannel(config.brrr_secret, api_base=config.brrr_api_base)
         # Printed so a mismatch between the configured value and the one the
         # operator tested by hand (wrong file, stray quote, inline comment,
         # truncated paste) is visible rather than inferred from a bare 403.

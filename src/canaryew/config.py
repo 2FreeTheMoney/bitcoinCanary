@@ -36,6 +36,7 @@ class ConfigError(RuntimeError):
 
 
 DEFAULT_ENV_FILE = "/etc/canaryew/canaryew.env"
+DEFAULT_BRRR_API_BASE = "https://api.brrr.now/v1"
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -150,6 +151,7 @@ class Config:
     """Env file consulted, if any. Provenance matters: a config silently
     falling back to defaults looks identical to a config with nothing in it."""
     env_file_loaded: bool = False
+    brrr_api_base: str = DEFAULT_BRRR_API_BASE
 
     def describe_env_file(self) -> str:
         """One line stating where configuration came from."""
@@ -250,6 +252,7 @@ def _build_config() -> Config:
         heartbeat_interval_seconds=_env_int("CANARYEW_HEARTBEAT_INTERVAL_SECONDS", 21_600),
         redaction=redaction,
         brrr_secret=_env("CANARYEW_BRRR_SECRET"),
+        brrr_api_base=_env("CANARYEW_BRRR_API_BASE") or DEFAULT_BRRR_API_BASE,
         smtp=smtp,
         pgp_recipient=_env("CANARYEW_PGP_RECIPIENT"),
         gnupg_home=Path(gnupg_raw).expanduser() if gnupg_raw else None,

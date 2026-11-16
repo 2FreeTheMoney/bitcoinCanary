@@ -108,6 +108,50 @@ def test_bearer_form_is_opt_in(monkeypatch) -> None:
     assert request.get_header("Authorization") == f"Bearer {SECRET}"
 
 
+@pytest.mark.parametrize("use_bearer", [False, True])
+@pytest.mark.parametrize("suffix", ["", "/"])
+def test_custom_api_base_for_delivery_and_health(monkeypatch, use_bearer, suffix) -> None:
+    fake = FakeUrlopen()
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+    base = "https://notify.example.invalid/push/v2"
+    channel = BrrrChannel(SECRET, api_base=f" {base}{suffix} ", use_bearer=use_bearer)
+
+    channel.send(note())
+    assert channel.healthy()
+
+    endpoint = "send" if use_bearer else SECRET
+    assert fake.requests[0].full_url == f"{base}/{endpoint}"
+    assert fake.requests[0].get_header("Authorization") == (
+        f"Bearer {SECRET}" if use_bearer else None
+    )
+    assert fake.requests[1].full_url == base
+    assert fake.requests[1].get_method() == "HEAD"
+    assert not fake.requests[1].has_header("Authorization")
+
+
+def test_full_webhook_url_still_overrides_delivery_base(monkeypatch) -> None:
+    fake = FakeUrlopen()
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+    webhook = f"https://webhook.example.invalid/v1/{SECRET}"
+    BrrrChannel(webhook, api_base="https://notify.example.invalid/v1").send(note())
+    assert fake.requests[0].full_url == webhook
+
+
+def test_custom_api_base_retry_and_secret_redaction(monkeypatch) -> None:
+    base = "https://notify.example.invalid/api/v1"
+    fake = FakeUrlopen(errors=[
+        http_error(400),
+        urllib.error.URLError(f"cannot reach {base}/{SECRET}"),
+    ])
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+
+    with pytest.raises(DeliveryError) as excinfo:
+        BrrrChannel(SECRET, api_base=base).send(note())
+    assert [request.full_url for request in fake.requests] == [f"{base}/{SECRET}"] * 2
+    assert SECRET not in str(excinfo.value)
+    assert set(fake.payload(1)) == {"title", "message", "interruption_level"}
+
+
 @pytest.mark.parametrize(
     ("severity", "level", "has_volume"),
     [

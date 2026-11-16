@@ -104,7 +104,7 @@ class Service:
     def _boot_channels(self) -> list[Channel]:
         """Channels usable before unlock: webhook only, by design."""
         if self.config.brrr_secret:
-            return [BrrrChannel(self.config.brrr_secret)]
+            return [BrrrChannel(self.config.brrr_secret, api_base=self.config.brrr_api_base)]
         return []
 
     def _build_dispatcher(self) -> Dispatcher:

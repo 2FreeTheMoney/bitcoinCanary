@@ -59,6 +59,26 @@ def make_service(home: Path, rpc: FakeRpc, **kwargs) -> tuple[Service, Recording
 
 # ----------------------------------------------------------------- lifecycle - #
 
+def test_configured_brrr_api_base_before_and_after_unlock(home: Path, monkeypatch) -> None:
+    from test_brrr import FakeUrlopen, SECRET, note
+
+    fake = FakeUrlopen()
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+    base = "https://notify.example.invalid/api/v1"
+    config = load_config({
+        "CANARYEW_HOME": str(home),
+        "CANARYEW_BRRR_SECRET": SECRET,
+        "CANARYEW_BRRR_API_BASE": base,
+    })
+    StateStore(config.state_path).initialize(PASSPHRASE)
+    service = Service(config, rpc=FakeRpc())
+    service._boot_channels()[0].send(note())
+    service.unlock_manager.unlock(PASSPHRASE)
+    result = service._build_dispatcher().dispatch(note())
+    assert result.delivered
+    assert [request.full_url for request in fake.requests] == [f"{base}/{SECRET}"] * 2
+
+
 def test_startup_announces_locked_state(home: Path) -> None:
     config = load_config({"CANARYEW_HOME": str(home)})
     StateStore(config.state_path).initialize(PASSPHRASE)

@@ -10,6 +10,9 @@ That URL-path form is therefore the default here. The ``/v1/send`` + bearer
 form from the docs remains available via ``use_bearer`` but is uncorroborated
 by working code.
 
+The API base is configurable for compatible services; the default remains
+``https://api.brrr.now/v1``.
+
 Fields beyond that core -- ``thread_id``, ``sound``, ``volume`` -- come from
 the docs only. Because an alert must not die on an optional field, a 4xx
 rejection triggers one retry with the minimal corroborated payload before the
@@ -35,12 +38,13 @@ import urllib.error
 import urllib.request
 from typing import Final
 
+from canaryew.config import DEFAULT_BRRR_API_BASE
 from canaryew.monitor import Severity
 from canaryew.notify.base import DeliveryError, Notification, RedactionTier
 
 logger = logging.getLogger("canaryew.notify.brrr")
 
-API_BASE: Final[str] = "https://api.brrr.now/v1"
+API_BASE: Final[str] = DEFAULT_BRRR_API_BASE
 DEFAULT_TIMEOUT: Final[float] = 15.0
 
 # Severity -> (interruption_level, sound). 'critical' requires the operator to
@@ -54,7 +58,7 @@ _DELIVERY: Final[dict[Severity, tuple[str, str]]] = {
 
 
 class BrrrChannel:
-    """Push notifications via brrr.now."""
+    """Push notifications via brrr.now or a compatible API."""
 
     name = "brrr"
 
@@ -68,6 +72,7 @@ class BrrrChannel:
         self,
         secret: str,
         *,
+        api_base: str = API_BASE,
         critical_volume: float = 1.0,
         timeout: float = DEFAULT_TIMEOUT,
         use_bearer: bool = False,
@@ -84,6 +89,7 @@ class BrrrChannel:
         else:
             self._url = None
             self._secret = raw
+        self._api_base = (api_base.strip() or API_BASE).rstrip("/")
         self._critical_volume = max(0.0, min(1.0, critical_volume))
         self._timeout = timeout
         # Default False: the URL-path form is corroborated by a working
@@ -92,8 +98,8 @@ class BrrrChannel:
 
     def _endpoint(self) -> str:
         if self._use_bearer:
-            return f"{API_BASE}/send"
-        return self._url or f"{API_BASE}/{self._secret}"
+            return f"{self._api_base}/send"
+        return self._url or f"{self._api_base}/{self._secret}"
 
     def _headers(self) -> dict[str, str]:
         # Explicit User-Agent: WAFs commonly 403 urllib's default
@@ -145,7 +151,7 @@ class BrrrChannel:
     def describe(self) -> str:
         """Safe-to-print summary of what this channel will send, for setup
         diagnosis: which endpoint form, and which secret value was loaded."""
-        form = "bearer /v1/send" if self._use_bearer else "url-path /v1/<secret>"
+        form = "bearer <api-base>/send" if self._use_bearer else "url-path <api-base>/<secret>"
         return (
             f"brrr endpoint={form} secret={redact_secret(self._secret)} "
             f"len={len(self._secret)}"
@@ -202,7 +208,7 @@ class BrrrChannel:
         which is the one failure this project cannot tolerate.
         """
         try:
-            request = urllib.request.Request(API_BASE, method="HEAD")
+            request = urllib.request.Request(self._api_base, method="HEAD")
             with urllib.request.urlopen(request, timeout=5.0):
                 return True
         except urllib.error.HTTPError:

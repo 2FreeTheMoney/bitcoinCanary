@@ -301,6 +301,24 @@ def test_set_smtp_password_round_trip(home: Path, monkeypatch, capsys) -> None:
 
 # --------------------------------------------------------------- test-alert -- #
 
+def test_test_alert_uses_configured_brrr_api_base(home: Path, monkeypatch, capsys) -> None:
+    from test_brrr import FakeUrlopen, SECRET
+
+    fake = FakeUrlopen()
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+    monkeypatch.setenv("CANARYEW_BRRR_SECRET", SECRET)
+    monkeypatch.setenv("CANARYEW_BRRR_API_BASE", "https://notify.example.invalid/api/v1")
+    feed_passphrases(monkeypatch, PASSPHRASE, PASSPHRASE)
+    assert cli.main(["init"]) == 0
+
+    feed_passphrases(monkeypatch, PASSPHRASE)
+    assert cli.main(["test-alert"]) == 0
+    assert fake.requests[0].full_url == f"https://notify.example.invalid/api/v1/{SECRET}"
+    output = capsys.readouterr().out
+    assert "brrr: delivered" in output
+    assert SECRET not in output
+
+
 def test_test_alert_through_file_transport(home: Path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CANARYEW_SMTP_MODE", "file")
     feed_passphrases(monkeypatch, PASSPHRASE, PASSPHRASE)
